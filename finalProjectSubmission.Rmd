@@ -1,0 +1,464 @@
+---
+title: "Categorical Stats Project"
+author: "Praxis Lewarchick"
+date: "2023-05-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, warning = FALSE)
+library(dplyr)
+library(plotly)
+library(tidyverse)
+library(DataExplorer)
+library(polycor)
+library(corrplot)
+library(htmlwidgets)
+library(moderndive)
+library(leaps)
+library(pROC)
+library(car)
+library(caret)
+library(caTools)
+library(boot)
+library(MASS)
+library(ROCR)
+```
+
+### Report
+
+Section 1: Logistic model with all predictors The logistic regression model with all predictors achieves an accuracy of 97.11% on the test data and 96.81% on the train data. The model's AIC (Akaike Information Criterion) is 1807.16, and its BIC (Bayesian Information Criterion) is 1956.303. The high accuracy levels indicate a good fit of the model to the data.
+
+Section 2: Best subset of variables and model diagnostics The best subset of variables for the logistic regression model includes: cap_surface, cap_color, bruises, odor, gill_attachment, gill_spacing, gill_size, gill_color, stalk_shape, stalk_root, stalk_surface_above_ring, stalk_surface_below_ring, stalk_color_above_ring, stalk_color_below_ring, veil_color, ring_number, ring_type, spore_print_color, population, and habitat. The model has a residual deviance of 1763.2, and its AIC is 1805.2, indicative of a reasonable model fit.
+
+Section 3: New model predictions and cutoff values Using the new model, we have test data accuracy at 97.11% and train data accuracy at 96.86%. Based on various cutoff values (pi_0), the confusion matrices and corresponding accuracies are calculated. The best cutoff value is found to be 0.6, with an accuracy of 97.17%.
+
+Section 4: ROC and AUC analysis The AUC (Area Under the Curve) of the model is 0.99, suggesting high predictive power. The best cutoff for the ROC (Receiver Operating Characteristic) curve is 0.6, with a sensitivity of 0.99 and specificity of 0.96.
+
+Section 5: LOOCV and K-Fold cross-validation The Leave-One-Out Cross-Validation (LOOCV) error is 0.56, and the K-fold cross-validation error is 0.97.
+
+Section 6: Probit and Identity Link models comparison The probit model has a training accuracy of 91.08% and test accuracy of 91.63%. The identity link model has a training accuracy of 94.35% and test accuracy of 94.58%. Additionally, the ROC-AUC for the probit model is 0.9103 (train) and 0.9166 (test), and for the identity link model, it is 0.9429 (train) and 0.9452 (test).
+
+Section 7: Contingency table analysis Performing Pearson's Chi-squared test with Yates' continuity correction, we find p-values for the logistic model (0.03272), probit model (< 2.2e-16), and identity link model (< 2.2e-16). The same trend holds when conducting Fisher's exact test for count data, with the p-values being smaller for probit and identity link models compared to the logistic model.
+
+In summary, the logistic regression model with all predictors and the selected best subset of variables displays high accuracy and good model fit with an AUC of 0.99. The optimal cutoff value for the best classification is found to be 0.6. Other models such as probit and identity link models also provide insights into the classification accuracy but are not as strong as the logistic regression model.
+
+
+### Logistic model with all predictors
+
+```{r}
+mushroom <- read.csv("mushrooms.csv")
+# Convert 'class' to a factor and encode categorical variables
+mushroom$class = as.factor(mushroom$class)
+for (col in names(mushroom)[-1]) {
+  mushroom[, col] = as.numeric(factor(mushroom[, col]))
+}
+
+# Remove one-level factors
+mushroom = mushroom[, !sapply(mushroom, function(col) length(unique(col)) == 1)]
+
+# Split the data into training and testing sets
+split = sample.split(mushroom$class, SplitRatio = 0.8)
+train = subset(mushroom, split == TRUE)
+test = subset(mushroom, split == FALSE)
+
+# Normalize predictor variables for both train and test sets
+train[, -1] = scale(train[, -1])
+test[, -1] = scale(test[, -1])
+
+# Fit a logistic regression model
+model = glm(class ~ ., data = train, family = "binomial")
+
+# Compute predicted class labels for test and training datasets
+test_pred = as.factor(predict(model, newdata = test, type = "response") > 0.5)
+train_pred = as.factor(predict(model, newdata = train, type = "response") > 0.5)
+
+# Set factor levels
+levels(test_pred) = levels(test$class)
+levels(train_pred) = levels(train$class)
+
+# Compute accuracy for test and training datasets
+test_acc = sum(test_pred == test$class) / nrow(test)
+train_acc = sum(train_pred == train$class) / nrow(train)
+
+# Compute AIC and BIC values
+AIC_val = AIC(model)
+BIC_val = BIC(model)
+
+# Print the results
+cat("Model Coefficients:\n")
+print(coef(model))
+
+cat("\nAccuracy (Test Data):", sprintf("%.2f%%", test_acc * 100), "\n")
+cat("Accuracy (Train Data):", sprintf("%.2f%%", train_acc * 100), "\n")
+
+cat("AIC:", AIC_val, "\n")
+cat("BIC:", BIC_val, "\n")
+```
+
+### Select the best subset of variables. Perform a diagnostic on the best model.  Perform all possible inferences you can think about.
+
+```{r}
+# perform "both" stepwise selection on the training data
+step.model = step(model, direction = "both", trace = FALSE)
+summary(step.model)
+
+# the VIF values for the model 
+vif = vif(step.model)
+# display VIF values greater than 5
+vif_greater_than_5 = vif[vif > 5]
+vif_greater_than_5
+
+```
+
+### Use new model to make predictions:
+
+```{r}
+# predicted class labels for the test dataset
+test_predicted = as.factor(predict(step.model, newdata = test, type = "response") > 0.5)
+levels(test_predicted) = levels(test$class)
+
+# predicted class labels for the training dataset
+train_predicted = as.factor(predict(step.model, newdata = train, type = "response") > 0.5)
+levels(train_predicted) = levels(train$class)
+
+# accuracy
+test_accuracy = sum(test_predicted == test$class) / nrow(test)
+train_accuracy = sum(train_predicted == train$class) / nrow(train)
+
+cat("Accuracy (Test Data): ", sprintf("%.2f%%", test_accuracy * 100), "\n")
+cat("Accuracy (Train Data): ", sprintf("%.2f%%", train_accuracy * 100), "\n")
+```
+
+### Use different pi_0 as a cut-off point and create a confusion table.
+
+
+
+```{r}
+# Define a vector of pi_0 values as cut-off points
+pi_0_vec = seq(0.1, 0.9, by = 0.1)
+
+# Create an empty list to store the confusion matrices for each pi_0 value
+conf_mat_list = list()
+
+for (pi_0 in pi_0_vec) {
+  predictions = predict(step.model, newdata = test, type = "response")
+  pred_class = ifelse(predictions > pi_0, "p", "e")
+  conf_mat = table(Predicted = pred_class, Actual = test$class)
+  colnames(conf_mat) = c("Edible", "Poisonous")
+  rownames(conf_mat) = c("Edible", "Poisonous")
+  conf_mat_list[[as.character(pi_0)]] = conf_mat
+}
+
+# Print the confusion matrices and accuracy for each pi_0 value
+for (pi_0 in pi_0_vec) {
+  cat("Confusion matrix for pi_0 =", pi_0, ":\n")
+  print(conf_mat_list[[as.character(pi_0)]])
+  accuracy = sum(diag(conf_mat_list[[as.character(pi_0)]])) / sum(conf_mat_list[[as.character(pi_0)]])
+  cat("Accuracy for pi_0 =", pi_0, ":", sprintf("%.2f%%", accuracy * 100), "\n\n")
+}
+
+# Vector of pi_0 cutoff values to try
+pi0_cutoffs = seq(0.1, 0.9, by = 0.1)
+
+# Initialize an empty vector to store accuracy values
+accuracy_vec = numeric(length = length(pi0_cutoffs))
+
+# Loop over each pi_0 cutoff value and calculate accuracy
+for (i in seq_along(pi0_cutoffs)) {
+  pred_class = ifelse(predictions > pi0_cutoffs[i], "p", "e")
+  conf_mat = table(Predicted = pred_class, Actual = test$class)
+  accuracy_vec[i] = sum(diag(conf_mat)) / sum(conf_mat)
+}
+
+# Find the index of the cutoff value with the highest accuracy
+best_cutoff_index = which.max(accuracy_vec)
+best_cutoff = pi0_cutoffs[best_cutoff_index]
+
+# Print the summary and best cutoff value
+cat("Summary of Cutoff Values:\n")
+for (i in seq_along(pi0_cutoffs)) {
+  cat("Cutoff:", pi0_cutoffs[i], "\tAccuracy:", sprintf("%.2f%%", accuracy_vec[i] * 100), "\n")
+}
+cat("\nBest Cutoff Value:", best_cutoff, "\n")
+```
+
+### Perform visualization of data and models
+
+```{r}
+
+cor_matrix <- cor(train[,-1])
+
+corrplot(cor_matrix, method = "circle")
+
+residuals <- residuals(step.model, type = "deviance")
+
+ggplot(data = data.frame(residuals), aes(x = 1:length(residuals), y=residuals)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(x = "Index", y = "Deviance Residuals", title = "Plot of Deviance Residuals")
+
+variables <- names(coef(step.model))
+importance <- abs(coef(step.model))
+
+imp_df <- data.frame(variable = variables, importance = importance)
+
+ggplot(imp_df, aes(x = reorder(variable, importance), y = importance)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(x = "Variable", y = "Absolute Coefficient Value", title = "Variable Importance Plot")
+
+library(pROC)
+
+train_proba <- predict(step.model, newdata = train, type = "response")
+test_proba <- predict(step.model, newdata = test, type = "response")
+
+roc_obj_train <- roc(train$class, train_proba)
+roc_obj_test <- roc(test$class, test_proba)
+
+ggroc(list(train = roc_obj_train, test = roc_obj_test), 
+      aes = "group", 
+      size = 1, 
+      legacy.axes = TRUE) +
+  labs(x = "False Positive Rate", y = "True Positive Rate", title = "ROC Curve",
+      subtitle = "Train and Test data")
+```
+
+### Plot ROC and AUC
+
+```{r}
+#AUC (Area Under the Curve), ROC (Receiver Operating Characteristic) 
+# predict class probabilities for the test set
+probabilities = predict(step.model, newdata = test, type = "response")
+
+# calculate FPR and TPR for various threshold values
+roc_data = pROC::roc(test$class, probabilities)
+
+# plot the ROC curve
+plot(roc_data, main = "ROC Curve")
+
+# calculate AUC
+auc = pROC::auc(roc_data)
+cat(sprintf("AUC: %.2f\n", auc))
+
+# calculate the best cutoff point
+cutoff = pROC::coords(roc_data, "best", ret = "threshold")[[1]]
+
+# Calculate predicted probabilities for the test set
+test_prob = predict(model, type="response", newdata=test)
+
+# Convert probabilities to predicted classes using the cutoff
+test_pred = ifelse(test_prob > cutoff, 1, 0)
+
+# Create confusion matrix
+confusion = table(test$class, test_pred)
+
+# Calculate sensitivity and specificity
+sensitivity = confusion[2,2]/sum(confusion[2,])
+specificity = confusion[1,1]/sum(confusion[1,])
+
+# Find the pi_0 cutoff value that gives the highest accuracy
+best_cutoff = pi0_cutoffs[which.max(accuracy_vec)]
+
+cat("Best cutoff:", round(best_cutoff, 2), "\n")
+cat("Sensitivity:", round(sensitivity, 2), "\n")
+cat("Specificity:", round(specificity, 2), "\n")
+```
+
+### LOOCV and K-Fold
+
+```{r}
+model = glm(class ~ ., data = mushroom, family = "binomial")
+step.model = step(model, direction = "both", trace = FALSE)
+
+# Make a copy of the original dataset
+mushroom_copy = mushroom
+
+# Set the desired sample size for LOOCV
+sample_size = 1000
+
+# Randomly select a smaller sample from the dataset
+sample_indices = sample(1:nrow(mushroom_copy), size = sample_size, replace = FALSE)
+sample_data = mushroom_copy[sample_indices, ]
+
+
+# Perform LOOCV on the smaller sample
+loocv_result = cv.glm(sample_data, step.model, K = nrow(sample_data))
+
+# k-fold Cross-Validation (k = 10)
+k_fold = 10
+kfold_result = cv.glm(mushroom, step.model, K = k_fold)
+
+# Accessing the performance measures
+loocv_error = 1 - loocv_result$delta[1]
+kfold_error = 1 - kfold_result$delta[1]
+
+# Print the results
+cat("LOOCV Error:", loocv_error, "\n")
+cat("K-fold Cross-Validation Errors:", kfold_error, "\n")
+```
+
+### Probit and Identity Link
+
+```{r}
+# Model with probit link
+probit_model = glm(class ~ ., data = train, family = binomial(link = "probit"))
+
+# Manually specify starting values for identity model
+identity_start = coef(probit_model)
+
+# Add a small perturbation to the starting values
+identity_start = identity_start + 0.01
+
+# Encode 'class' variable as 0 and 1
+train$class = as.numeric(train$class) - 1
+test$class = as.numeric(test$class) - 1
+
+# Model with identity link using starting values and Identity Links family
+identity_model = glm(class ~ ., data = train, family = gaussian(link = "identity"), start = identity_start)
+
+# Predict on the test set using probit model
+probit_predictions = predict(probit_model, newdata = test, type = "response")
+
+# Predict on the train set using probit model
+probit_train_predictions = predict(probit_model, newdata = train, type = "response")
+
+# Predict on the train set using identity model
+identity_train_predictions = predict(identity_model, newdata = train, type = "response")
+
+# Convert probabilities to class predictions for the train set
+probit_train_predictions = ifelse(probit_train_predictions >= 0.5, 1, 0)
+identity_train_predictions = ifelse(identity_train_predictions >= 0.5, 1, 0)
+
+# Calculate train accuracies
+probit_train_accuracy = sum(probit_train_predictions == train$class) / nrow(train)
+identity_train_accuracy = sum(identity_train_predictions == train$class) / nrow(train)
+
+# Predict on the test set using probit model
+probit_test_predictions = predict(probit_model, newdata = test, type = "response")
+
+# Predict on the test set using identity model
+identity_test_predictions = predict(identity_model, newdata = test, type = "response")
+
+# Convert probabilities to class predictions for the test set
+probit_test_predictions = ifelse(probit_test_predictions >= 0.5, 1, 0)
+identity_test_predictions = ifelse(identity_test_predictions >= 0.5, 1, 0)
+
+# Calculate test accuracies
+probit_test_accuracy = sum(probit_test_predictions == test$class) / nrow(test)
+identity_test_accuracy = sum(identity_test_predictions == test$class) / nrow(test)
+
+# Print the results
+cat("Probit Model Training Accuracy:", probit_train_accuracy, "\n")
+cat("Probit Model Test Accuracy:", probit_test_accuracy, "\n")
+cat("Identity Model Training Accuracy:", identity_train_accuracy, "\n")
+cat("Identity Model Test Accuracy:", identity_test_accuracy, "\n")
+
+# Load the required packages
+library(ROCR)
+
+# Create prediction objects for the train set
+probit_train_pred_obj = prediction(probit_train_predictions, train$class)
+identity_train_pred_obj = prediction(identity_train_predictions, train$class)
+
+# Calculate ROC-AUC for train set
+probit_train_auc = as.numeric(performance(probit_train_pred_obj, "auc")@y.values)
+identity_train_auc = as.numeric(performance(identity_train_pred_obj, "auc")@y.values)
+
+# Create prediction objects for the test set
+probit_test_pred_obj = prediction(probit_test_predictions, test$class)
+identity_test_pred_obj = prediction(identity_test_predictions, test$class)
+
+# Calculate ROC-AUC for test set
+probit_test_auc = as.numeric(performance(probit_test_pred_obj, "auc")@y.values)
+identity_test_auc = as.numeric(performance(identity_test_pred_obj, "auc")@y.values)
+
+# Print the results
+cat("Probit Model ROC-AUC (Train):", probit_train_auc, "\n")
+cat("Probit Model ROC-AUC (Test):", probit_test_auc, "\n")
+cat("Identity Model ROC-AUC (Train):", identity_train_auc, "\n")
+cat("Identity Model ROC-AUC (Test):", identity_test_auc, "\n")
+```
+
+### Which model works better for this data
+
+Based on the provided data, it appears that the Identity Link model performs better than the Probit model for this data. Comparing the metrics:
+
+Training Accuracy:  
+Probit Model: 0.9047546  
+Identity Model: 0.9470688  
+
+Test Accuracy:  
+Probit Model: 0.912  
+Identity Model: 0.9452308  
+
+ROC-AUC (Train):  
+Probit Model: 0.9041956  
+Identity Model: 0.9465588  
+
+ROC-AUC (Test):  
+Probit Model: 0.9111903  
+Identity Model: 0.9448229  
+The Identity Link model shows better performance in terms of accuracy and ROC-AUC for both training and test datasets.
+
+### If you have grouped data, use the methods for contingency tables to analyze the data
+
+```{r}
+library(pROC)
+
+# Predict classes using the logistic regression model
+logistic_preds = predict(step.model, test, type = "response")
+logistic_classes = ifelse(logistic_preds > 0.5, "p", "e")
+
+# Create contingency table for logistic regression predictions
+logistic_table = table(logistic_classes, test$class)
+
+# Predict classes using the probit regression model
+probit_preds = predict(probit_model, test, type = "response")
+probit_classes = ifelse(probit_preds > 0.5, "p", "e")
+
+# Create contingency table for probit regression predictions
+probit_table = table(probit_classes, test$class)
+
+# Predict classes using the Identity Links regression model
+identity_preds = predict(identity_model, test)
+identity_classes = ifelse(identity_preds > 0.5, "p", "e")
+
+# Create contingency table for Identity Links regression predictions
+identity_table = table(identity_classes, test$class)
+
+# Print contingency table for logistic regression predictions
+print(addmargins(logistic_table))
+
+# Print contingency table for probit regression predictions
+print(addmargins(probit_table))
+
+# Print contingency table for Identity Links regression predictions
+print(addmargins(identity_table))
+
+```
+
+```{r}
+# Perform Chi-squared test for logistic regression predictions
+chi2_logistic = chisq.test(logistic_table)
+print(chi2_logistic)
+
+# Perform Chi-squared test for probit regression predictions
+chi2_probit = chisq.test(probit_table)
+print(chi2_probit)
+
+# Perform Chi-squared test for Identity Links regression predictions
+chi2_identity = chisq.test(identity_table)
+print(chi2_identity)
+```
+
+```{r}
+fisher_logistic = fisher.test(logistic_table)
+print(fisher_logistic)
+# Perform Fisher's exact test for probit regression predictions
+fisher_probit = fisher.test(probit_table)
+print(fisher_probit)
+# Perform Fisher's exact test for identity links regression predictions
+fisher_identity = fisher.test(identity_table)
+print(fisher_identity)
+```
